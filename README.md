@@ -309,6 +309,4 @@ Code never lands on main without your review.
 
 ## Credits
 
-Inspired by [Ryan Carson's compound engineering post](https://x.com/ryancarson/status/2016520542723924279) and built on:
-- [Compound Engineering Plugin](https://github.com/kieranklaassen/claude-code-compound) by Kieran Klaassen
-- Claude Code by Anthropic
+Inspired by [Ryan Carson's compound engineering post](https://x.com/ryancarson/status/2016520542723924279).
