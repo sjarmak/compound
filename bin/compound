@@ -1,0 +1,228 @@
+#!/bin/bash
+# compound - Global CLI for managing nightly compound engineering loops
+#
+# Usage:
+#   compound setup /path/to/project [options]   Set up a project
+#   compound status                              Show all projects
+#   compound on [project]                        Enable a project's loop
+#   compound off [project]                       Disable a project's loop
+#   compound logs [project]                      Tail logs for a project
+#   compound run [project]                       Manually trigger the compound loop
+
+set -e
+
+# Resolve symlinks to find the actual bin directory
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+PLIST_DIR="$HOME/Library/LaunchAgents"
+
+# ─────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────
+is_loaded() {
+  launchctl list 2>/dev/null | grep -q "$1"
+}
+
+get_project_labels() {
+  ls "$PLIST_DIR"/com.compound.*.review.plist 2>/dev/null | while read f; do
+    # Extract project name from label: com.compound.{name}.review.plist
+    basename "$f" .plist | sed 's/^com\.compound\.//' | sed 's/\.review$//'
+  done
+}
+
+get_project_dir() {
+  local name="$1"
+  local plist="$PLIST_DIR/com.compound.$name.review.plist"
+  if [ -f "$plist" ]; then
+    /usr/libexec/PlistBuddy -c "Print :WorkingDirectory" "$plist" 2>/dev/null
+  fi
+}
+
+get_schedule() {
+  local plist="$1"
+  if [ -f "$plist" ]; then
+    local hour=$(/usr/libexec/PlistBuddy -c "Print :StartCalendarInterval:Hour" "$plist" 2>/dev/null || echo "?")
+    local min=$(/usr/libexec/PlistBuddy -c "Print :StartCalendarInterval:Minute" "$plist" 2>/dev/null || echo "?")
+    printf "%02d:%02d" "$hour" "$min"
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# Commands
+# ─────────────────────────────────────────────────────────────────────
+cmd_setup() {
+  "$SCRIPT_DIR/setup-compound.sh" "$@"
+}
+
+cmd_status() {
+  echo "Compound Engineering - Project Status"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+
+  local projects=$(get_project_labels)
+
+  if [ -z "$projects" ]; then
+    echo "  No projects configured."
+    echo "  Run: compound setup /path/to/project"
+    return
+  fi
+
+  printf "  %-25s %-8s %-8s %-14s %s\n" "PROJECT" "REVIEW" "COMPOUND" "SCHEDULE" "DIRECTORY"
+  printf "  %-25s %-8s %-8s %-14s %s\n" "───────" "──────" "────────" "────────" "─────────"
+
+  echo "$projects" | while read name; do
+    local review_label="com.compound.$name.review"
+    local compound_label="com.compound.$name.compound"
+    local review_plist="$PLIST_DIR/$review_label.plist"
+    local compound_plist="$PLIST_DIR/$compound_label.plist"
+
+    local review_status="OFF"
+    local compound_status="OFF"
+    is_loaded "$review_label" && review_status="ON"
+    is_loaded "$compound_label" && compound_status="ON"
+
+    local review_time=$(get_schedule "$review_plist")
+    local compound_time=$(get_schedule "$compound_plist")
+    local dir=$(get_project_dir "$name")
+
+    printf "  %-25s %-8s %-8s %s / %s  %s\n" "$name" "$review_status" "$compound_status" "$review_time" "$compound_time" "$dir"
+  done
+
+  echo ""
+
+  # Caffeinate status
+  if is_loaded "com.compound.caffeinate"; then
+    echo "  Caffeinate: ON"
+  else
+    echo "  Caffeinate: OFF (Mac may sleep during nightly window!)"
+  fi
+  echo ""
+}
+
+cmd_on() {
+  local name="$1"
+  if [ -z "$name" ]; then
+    echo "Usage: compound on <project-name>"
+    echo ""
+    echo "Available projects:"
+    get_project_labels | sed 's/^/  /'
+    return 1
+  fi
+
+  local dir=$(get_project_dir "$name")
+  if [ -z "$dir" ]; then
+    echo "Project '$name' not found."
+    return 1
+  fi
+
+  echo "Enabling nightly loop for $name..."
+  launchctl load "$PLIST_DIR/com.compound.$name.review.plist" 2>/dev/null && echo "  Review: loaded" || echo "  Review: already loaded"
+  launchctl load "$PLIST_DIR/com.compound.$name.compound.plist" 2>/dev/null && echo "  Compound: loaded" || echo "  Compound: already loaded"
+}
+
+cmd_off() {
+  local name="$1"
+  if [ -z "$name" ]; then
+    echo "Usage: compound off <project-name>"
+    echo ""
+    echo "Available projects:"
+    get_project_labels | sed 's/^/  /'
+    return 1
+  fi
+
+  local dir=$(get_project_dir "$name")
+  if [ -z "$dir" ]; then
+    echo "Project '$name' not found."
+    return 1
+  fi
+
+  echo "Disabling nightly loop for $name..."
+  launchctl unload "$PLIST_DIR/com.compound.$name.review.plist" 2>/dev/null && echo "  Review: unloaded" || echo "  Review: already unloaded"
+  launchctl unload "$PLIST_DIR/com.compound.$name.compound.plist" 2>/dev/null && echo "  Compound: unloaded" || echo "  Compound: already unloaded"
+}
+
+cmd_logs() {
+  local name="$1"
+  local log_type="${2:-compound}"
+
+  if [ -z "$name" ]; then
+    echo "Usage: compound logs <project-name> [review|compound]"
+    echo ""
+    echo "Available projects:"
+    get_project_labels | sed 's/^/  /'
+    return 1
+  fi
+
+  local dir=$(get_project_dir "$name")
+  if [ -z "$dir" ]; then
+    echo "Project '$name' not found."
+    return 1
+  fi
+
+  case "$log_type" in
+    review)
+      tail -f "$dir/logs/compound-review.log"
+      ;;
+    compound|*)
+      tail -f "$dir/logs/auto-compound.log"
+      ;;
+  esac
+}
+
+cmd_run() {
+  local name="$1"
+  if [ -z "$name" ]; then
+    echo "Usage: compound run <project-name>"
+    echo ""
+    echo "Available projects:"
+    get_project_labels | sed 's/^/  /'
+    return 1
+  fi
+
+  echo "Manually triggering compound loop for $name..."
+  launchctl start "com.compound.$name.review"
+  echo "  Review job started. Compound job will follow at its scheduled time."
+  echo "  Or trigger it now: launchctl start com.compound.$name.compound"
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────────────────────────────
+case "${1:-help}" in
+  setup)  shift; cmd_setup "$@" ;;
+  status) cmd_status ;;
+  on)     shift; cmd_on "$@" ;;
+  off)    shift; cmd_off "$@" ;;
+  logs)   shift; cmd_logs "$@" ;;
+  run)    shift; cmd_run "$@" ;;
+  help|*)
+    echo "compound - Nightly compound engineering loop manager"
+    echo ""
+    echo "Usage:"
+    echo "  compound setup /path/to/project [options]   Set up a new project"
+    echo "  compound status                              Show all projects"
+    echo "  compound on <project>                        Enable a project"
+    echo "  compound off <project>                       Disable a project"
+    echo "  compound logs <project> [review|compound]    Tail project logs"
+    echo "  compound run <project>                       Manually trigger"
+    echo ""
+    echo "Setup options:"
+    echo "  --review-hour H      Hour for review job (default: 22)"
+    echo "  --review-min M       Minute for review job (default: 30)"
+    echo "  --compound-hour H    Hour for compound job (default: 23)"
+    echo "  --compound-min M     Minute for compound job (default: 0)"
+    echo ""
+    echo "Examples:"
+    echo "  compound setup ~/projects/my-app"
+    echo "  compound setup ~/projects/my-app --review-hour 1 --compound-hour 1 --compound-min 30"
+    echo "  compound status"
+    echo "  compound off my-app"
+    echo "  compound on my-app"
+    echo "  compound logs my-app review"
+    ;;
+esac
