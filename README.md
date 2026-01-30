@@ -30,10 +30,14 @@ Each morning you wake up to:
 
 - **macOS** (uses launchd for scheduling)
 - **Claude Code** CLI
+- **uv** (Python package manager)
 
 ```bash
 # Verify Claude Code is installed
 claude --version
+
+# Install uv if you don't have it
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 ### 1. Clone this repo
@@ -45,9 +49,6 @@ git clone https://github.com/sjarmak/compound.git ~/compound
 ### 2. Install dependencies
 
 ```bash
-# Claude Code transcript exporter (for reviewing past sessions)
-uv tool install claude-code-transcripts
-
 # GitHub CLI (for creating draft PRs)
 brew install gh
 gh auth login
@@ -56,7 +57,25 @@ gh auth login
 brew install jq
 ```
 
-### 3. Add the `compound` CLI to your PATH
+### 3. Install claude-code-transcripts
+
+The review job uses [claude-code-transcripts](https://pypi.org/project/claude-code-transcripts/) to export your Claude Code session history as browsable HTML. This is how the nightly review reads what you worked on and extracts learnings into `CLAUDE.md`.
+
+```bash
+uv tool install claude-code-transcripts
+```
+
+Verify it's working:
+
+```bash
+claude-code-transcripts --version
+```
+
+Commands used by Compound:
+- `claude-code-transcripts all` — Exports all local sessions to `~/claude-archive/`
+- `claude-code-transcripts local` — Export a single session interactively
+
+### 4. Add the `compound` CLI to your PATH
 
 ```bash
 ln -sf ~/compound/bin/compound ~/.local/bin/compound
@@ -68,7 +87,7 @@ Or add `~/compound/bin` to your PATH in your shell config:
 export PATH="$HOME/compound/bin:$PATH"
 ```
 
-### 4. Set up the caffeinate agent
+### 5. Set up the caffeinate agent
 
 launchd won't wake a sleeping Mac. This keeps it awake from 5 PM to 2 AM:
 
@@ -103,7 +122,7 @@ launchctl load ~/Library/LaunchAgents/com.compound.caffeinate.plist
 
 Extend the `-t` value (seconds) if you run multiple projects that go past 2 AM.
 
-### 5. Set up Ralph in your project (for the implementation loop)
+### 6. Set up Ralph in your project (for the implementation loop)
 
 The auto-compound job uses Ralph to implement features autonomously. Copy the Ralph scripts into your project:
 
