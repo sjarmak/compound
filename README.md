@@ -328,4 +328,5 @@ Code never lands on main without your review.
 
 ## Credits
 
-Inspired by [Ryan Carson's compound engineering post](https://x.com/ryancarson/status/2016520542723924279).
+- Inspired by [Ryan Carson's compound engineering post](https://x.com/ryancarson/status/2016520542723924279).
+- Session export powered by [claude-code-transcripts](https://pypi.org/project/claude-code-transcripts/) by [Simon Willison](https://simonwillison.net/).
